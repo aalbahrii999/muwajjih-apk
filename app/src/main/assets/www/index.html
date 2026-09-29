@@ -1,0 +1,656 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>موجه</title>
+<style>
+  :root {
+    --bg: #0b0f14;
+    --card: #121826;
+    --raised: #1a2230;
+    --ink: #f3eee6;
+    --muted: #a8b0b8;
+    --line: #243041;
+    --teal: #1b5e56;
+    --bright: #8fd0c6;
+    --danger: #e08a7a;
+    --ok: #7dcea0;
+    --warn: #e2c27a;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--ink); font-family: "Noto Naskh Arabic", "Segoe UI", sans-serif; }
+  button, input, select { font-family: inherit; font-size: 16px; }
+  button { cursor: pointer; }
+  header { position: sticky; top: 0; z-index: 2; display: flex; justify-content: space-between; align-items: center; padding: 14px 16px; background: rgba(11,15,20,.95); border-bottom: 1px solid var(--line); }
+  header b { font-size: 20px; }
+  header span { color: var(--bright); font-size: 12px; }
+  main { padding: 14px 14px 104px; max-width: 560px; margin: 0 auto; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 18px; padding: 14px; margin-bottom: 12px; }
+  h2 { margin: 0 0 6px; font-size: 16px; }
+  p.hint, .hint { color: var(--muted); font-size: 13px; margin: 0 0 10px; line-height: 1.5; }
+  label { display: block; color: var(--muted); font-size: 13px; margin: 8px 0 4px; }
+  input, select {
+    width: 100%; min-height: 44px; border-radius: 12px; border: 1px solid var(--line);
+    background: var(--bg); color: var(--ink); padding: 0 12px;
+  }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+  button.p, button.g, button.d, button.q {
+    min-height: 44px; border-radius: 12px; padding: 0 14px; border: 1px solid transparent;
+  }
+  button.p { background: var(--teal); color: var(--ink); }
+  button.g { background: var(--raised); color: var(--ink); border-color: var(--line); }
+  button.d { background: transparent; color: var(--danger); border-color: rgba(224,138,122,.5); }
+  button.q { background: transparent; color: var(--muted); }
+  button:disabled { opacity: .5; }
+  .grid { display: grid; grid-cols: 2; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .metric { background: var(--raised); border-radius: 12px; padding: 8px 10px; }
+  .metric small { color: var(--muted); display: block; }
+  .metric b { font-weight: 600; }
+  .banner { border: 1px solid var(--line); border-radius: 12px; padding: 8px 10px; color: var(--muted); font-size: 13px; margin-bottom: 10px; }
+  .banner.bad { color: var(--danger); border-color: rgba(224,138,122,.4); }
+  .banner.ok { color: var(--ok); border-color: rgba(125,206,160,.4); }
+  nav {
+    position: fixed; inset-inline: 0; bottom: 0; display: grid; grid-template-columns: repeat(5, 1fr);
+    background: var(--card); border-top: 1px solid var(--line); padding-bottom: env(safe-area-inset-bottom);
+  }
+  nav button { background: none; border: 0; color: var(--muted); min-height: 62px; font-size: 12px; }
+  nav button.on { color: var(--bright); }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  td, th { text-align: right; padding: 6px 4px; border-top: 1px solid var(--line); }
+  .dot { width: 8px; height: 8px; border-radius: 99px; display: inline-block; margin-inline-end: 6px; }
+  .onl { background: var(--ok); } .off { background: var(--danger); }
+  dialog { width: min(440px, calc(100% - 24px)); background: var(--card); color: var(--ink); border: 1px solid var(--line); border-radius: 18px; }
+  dialog::backdrop { background: rgba(0,0,0,.6); }
+</style>
+</head>
+<body>
+<header>
+  <div><b>موجه</b><div class="hint" id="ver" style="margin:2px 0 0">الإصدار 1.0.0</div></div>
+  <span id="status">بانتظار اتصال</span>
+</header>
+<main id="app"></main>
+<nav>
+  <button data-tab="home" class="on">الرئيسية</button>
+  <button data-tab="net">الشبكة</button>
+  <button data-tab="scan">الفحص</button>
+  <button data-tab="clients">الأجهزة</button>
+  <button data-tab="more">المزيد</button>
+</nav>
+<dialog id="dlg"></dialog>
+<script>
+const VERSION = "1.0.0";
+const PROFILES = {
+  B1: {alive:1, rsrp:-102, rsrq:-12, sinr:6, rssi:-74, pci:201, earfcn:100, cell:"A1B2", ping:68, down:18, up:8},
+  B3: {alive:1, rsrp:-91, rsrq:-9, sinr:14, rssi:-62, pci:88, earfcn:1650, cell:"C3D4", ping:41, down:48, up:16},
+  B7: {alive:1, rsrp:-96, rsrq:-10, sinr:11, rssi:-68, pci:140, earfcn:3200, cell:"E5F6", ping:52, down:62, up:14},
+  B8: {alive:1, rsrp:-88, rsrq:-8, sinr:9, rssi:-58, pci:52, earfcn:3650, cell:"A9B0", ping:58, down:22, up:10},
+  B20:{alive:1, rsrp:-84, rsrq:-11, sinr:7, rssi:-55, pci:17, earfcn:6300, cell:"1122", ping:71, down:12, up:6},
+  B28:{alive:1, rsrp:-99, rsrq:-13, sinr:8, rssi:-71, pci:260, earfcn:9360, cell:"3344", ping:64, down:20, up:9},
+  n41:{alive:1, rsrp:-97, rsrq:-9, sinr:16, rssi:-64, pci:388, earfcn:510000, cell:"5G41", ping:33, down:110, up:28},
+  n78:{alive:1, rsrp:-93, rsrq:-8, sinr:18, rssi:-60, pci:401, earfcn:633333, cell:"5G01", ping:28, down:140, up:30},
+  B40:{alive:0, rsrp:-128, rsrq:-20, sinr:-5, rssi:-110, pci:0, earfcn:39150, cell:"", ping:0, down:0, up:0}
+};
+const state = {
+  tab: "home",
+  mode: "lab",
+  online: false,
+  gateway: "http://192.168.8.1",
+  username: "admin",
+  cookie: "",
+  tokens: [],
+  notice: "",
+  noticeBad: false,
+  info: null,
+  signal: null,
+  lock: null,
+  dns: ["8.8.8.8", "1.1.1.1"],
+  lan: "192.168.8.1",
+  apn: "jawalnet.com.sa",
+  apnName: "افتراضي",
+  game: false,
+  clients: [
+    {name:"جوال البيت", ip:"192.168.8.110", mac:"02:11:22:33:44:55"},
+    {name:"تلفزيون الصالة", ip:"192.168.8.120", mac:"02:11:22:33:44:66"}
+  ],
+  logs: [],
+  report: null,
+  bands: "B1, B3, B7, B8, B20, B28, n41, n78, B40",
+  link: null,
+  busy: false
+};
+
+function log(summary) {
+  state.logs.unshift({t: new Date().toLocaleTimeString("ar-SA", {hour:"2-digit", minute:"2-digit"}), summary});
+  state.logs = state.logs.slice(0, 50);
+}
+function camp() { return state.lock || "B3"; }
+function profile(band) { return PROFILES[band] || PROFILES.B3; }
+function jitter() { return (Math.random() - 0.5) * 2; }
+function esc(s) {
+  return String(s).replace(/&/g, "&"+"amp;").replace(/</g, "&"+"lt;").replace(/>/g, "&"+"gt;");
+}
+function tag(xml, name) {
+  const m = String(xml).match(new RegExp("<"+name+">([\\s\\S]*?)</"+name+">", "i"));
+  return m ? m[1].trim() : "";
+}
+function num(v) {
+  const m = String(v || "").replace(",",".").match(/-?\d+(\.\d+)?/);
+  return m ? Number(m[0]) : null;
+}
+function xml(fields) {
+  return "<?xml version=\"1.0\" encoding=\"UTF-8\"?><request>" +
+    Object.entries(fields).map(([k,v]) => "<"+k+">"+esc(v)+"</"+k+">").join("") + "</request>";
+}
+function assertOk(xmlText) {
+  if (!/<error>/i.test(xmlText)) return;
+  const code = tag(xmlText, "code");
+  const known = {
+    "108001": "اسم المستخدم أو كلمة المرور غير صحيحة.",
+    "108002": "اسم المستخدم أو كلمة المرور غير صحيحة.",
+    "108003": "اسم المستخدم أو كلمة المرور غير صحيحة.",
+    "108006": "في جلسة مفتوحة على الراوتر. اقفل صفحة الإدارة وجرّب.",
+    "108007": "محاولات كثيرة. انتظر ثم أعد الدخول."
+  };
+  throw new Error(known[code] || (code ? "الراوتر رفض الطلب (رمز "+code+")." : "الراوتر رفض الطلب."));
+}
+function bridge() { return typeof Muwajjih !== "undefined" ? Muwajjih : null; }
+
+async function liveExchange(path, method, body) {
+  const native = bridge();
+  if (!native) throw new Error("الاتصال الحي يشتغل من تطبيق الجوال وأنت على واي فاي الراوتر.");
+  const raw = native.exchange(state.gateway, path, method || "GET", body || "", state.cookie || "", state.tokens[0] || "");
+  const res = JSON.parse(raw);
+  if (!res.ok) throw new Error(res.error || "تعذّر الطلب.");
+  if (res.cookie) state.cookie = res.cookie;
+  if (res.token) state.tokens = String(res.token).split("#").map(s => s.trim()).filter(Boolean);
+  else if ((method || "GET") === "POST" && state.tokens.length > 1) state.tokens = state.tokens.slice(1);
+  if (res.status === 404) throw new Error("هذا المسار غير موجود على الراوتر.");
+  return res.text;
+}
+
+async function liveLogin(password) {
+  let last;
+  for (let i = 0; i < 2; i++) {
+    try {
+      let sessionXml;
+      try { sessionXml = await liveExchange("/api/webserver/SesTokInfo", "GET"); }
+      catch (e) {
+        if (i === 1) throw e;
+        sessionXml = await liveExchange("/api/webserver/token", "GET");
+      }
+      const ses = tag(sessionXml, "SesInfo");
+      const tok = tag(sessionXml, "TokInfo") || tag(sessionXml, "token");
+      if (ses) state.cookie = ses;
+      if (tok) state.tokens = [tok];
+      if (!state.tokens[0]) throw new Error("الراوتر ما أعطى رمز جلسة.");
+      const hashed = bridge().huaweiPassword(state.username || "admin", password, state.tokens[0]);
+      const reply = await liveExchange("/api/user/login", "POST", xml({
+        Username: state.username || "admin",
+        Password: hashed,
+        password_type: "4"
+      }));
+      assertOk(reply);
+      return;
+    } catch (e) {
+      last = e;
+      if (/كلمة المرور|محاولات/.test(e.message)) throw e;
+    }
+  }
+  throw last || new Error("ما قدرنا نسجّل الدخول.");
+}
+
+async function refreshLive() {
+  const info = await liveExchange("/api/device/information", "GET");
+  let wan = "—", operator = "—", dns = [], lan = "—";
+  try { wan = tag(await liveExchange("/api/monitoring/status", "GET"), "WanIPAddress") || "—"; } catch (e) {}
+  try { operator = tag(await liveExchange("/api/net/current-plmn", "GET"), "FullName") || "—"; } catch (e) {}
+  try {
+    const dhcp = await liveExchange("/api/dhcp/settings", "GET");
+    lan = tag(dhcp, "DhcpIPAddress") || "—";
+    dns = [tag(dhcp, "PrimaryDns"), tag(dhcp, "SecondaryDns")].filter(Boolean);
+  } catch (e) {}
+  state.info = {
+    model: tag(info, "DeviceName") || "هواوي",
+    software: tag(info, "SoftwareVersion") || "—",
+    identity: tag(info, "Imei") || "—",
+    wan, operator, sim: tag(info, "SimStatus") || "—",
+    dns, lan, wifi: "من الراوتر"
+  };
+  state.dns = dns.length ? dns : state.dns;
+  if (lan !== "—") state.lan = lan;
+  const sig = await liveExchange("/api/device/signal", "GET");
+  const bandRaw = tag(sig, "band") || tag(sig, "lte_band");
+  state.signal = {
+    rsrp: num(tag(sig, "rsrp")), rsrq: num(tag(sig, "rsrq")), sinr: num(tag(sig, "sinr")),
+    rssi: num(tag(sig, "rssi")), band: bandRaw ? "B"+bandRaw.replace(/\D/g,"") : null,
+    pci: num(tag(sig, "pci")), earfcn: num(tag(sig, "earfcn")), cell: tag(sig, "cell_id") || null
+  };
+}
+
+function refreshLab() {
+  const p = profile(camp());
+  state.info = {
+    model: "موجه تجريبي B535",
+    software: "11.0.1.1 (lab)",
+    identity: "تجريبي-ليس-IMEI",
+    wan: "10.20.30.40",
+    operator: "تجريبي",
+    sim: "شريحة تجريبية جاهزة",
+    dns: state.dns.slice(),
+    lan: state.lan,
+    wifi: "Muwajjih-Lab"
+  };
+  if (!p.alive) {
+    state.signal = {rsrp:null, rsrq:null, sinr:null, rssi:null, band: camp(), pci:null, earfcn:p.earfcn, cell:null};
+    return;
+  }
+  state.signal = {
+    rsrp: Math.round(p.rsrp + jitter()), rsrq: p.rsrq, sinr: Math.round(p.sinr + jitter()*0.3),
+    rssi: p.rssi, band: camp(), pci: p.pci, earfcn: p.earfcn, cell: p.cell
+  };
+}
+
+function labLink() {
+  const p = profile(camp());
+  if (!p.alive) throw new Error("ما في خدمة على القفل الحالي.");
+  return {
+    ping: Math.max(8, Math.round(p.ping + (state.game ? -4 : 0) + jitter())),
+    down: p.down, up: p.up
+  };
+}
+
+function setNotice(text, bad) {
+  state.notice = text;
+  state.noticeBad = !!bad;
+  render();
+}
+
+async function connect(password) {
+  state.busy = true; render();
+  try {
+    if (state.mode === "lab") {
+      if ((state.username || "admin") !== "admin" || password !== "admin") {
+        throw new Error("اسم المستخدم أو كلمة المرور غير صحيحة.");
+      }
+      state.online = true;
+      refreshLab();
+      log("اتصال بالراوتر التجريبي");
+      setNotice("تم الاتصال بالتجريبي.", false);
+    } else {
+      state.cookie = ""; state.tokens = [];
+      await liveLogin(password);
+      state.online = true;
+      await refreshLive();
+      log("اتصال براوتر حي");
+      setNotice("تم الاتصال بالراوتر.", false);
+    }
+  } catch (e) {
+    state.online = false;
+    setNotice(e.message || "تعذّر الاتصال.", true);
+    log(e.message || "خطأ اتصال");
+  } finally {
+    state.busy = false; render();
+  }
+}
+
+function disconnect() {
+  state.online = false; state.info = null; state.signal = null; state.link = null;
+  state.cookie = ""; state.tokens = [];
+  setNotice("انقطع الاتصال.", false);
+}
+
+function metric(label, value) {
+  return '<div class="metric"><small>'+esc(label)+'</small><b>'+esc(value == null || value === "" ? "—" : String(value))+'</b></div>';
+}
+
+function home() {
+  const s = state.signal;
+  return `
+    <section class="card">
+      <h2>الجهاز</h2>
+      <p class="hint">كلمة المرور ما تنحفظ. الإصدار ${VERSION}.</p>
+      <div><span class="dot ${state.online ? "onl" : "off"}"></span>${state.online ? "متصل" : "غير متصل"} · ${state.mode === "lab" ? "هواوي تجريبي" : "هواوي حي"}</div>
+      <label>النوع</label>
+      <select id="mode">
+        <option value="lab" ${state.mode==="lab"?"selected":""}>راوتر تجريبي داخل التطبيق</option>
+        <option value="live" ${state.mode==="live"?"selected":""}>هواوي على الواي فاي</option>
+      </select>
+      <label>العنوان</label>
+      <input id="gw" dir="ltr" value="${esc(state.gateway)}" />
+      <label>المستخدم</label>
+      <input id="user" dir="ltr" value="${esc(state.username)}" />
+      ${state.online ? `<div class="row"><button class="g" id="disc">قطع الاتصال</button></div>` : `
+        <label>كلمة المرور</label>
+        <input id="pass" type="password" autocomplete="off" />
+        <div class="row">
+          <button class="p" id="go" ${state.busy?"disabled":""}>اتصال</button>
+          ${state.mode==="lab" ? '<button class="g" id="lab">دخول التجريبي</button>' : ""}
+        </div>
+        <p class="hint">${state.mode==="lab" ? "التجريبي: المستخدم admin وكلمة المرور admin." : "خلّ الجوال على واي فاي الراوتر. العنوان الشائع 192.168.8.1."}</p>
+      `}
+    </section>
+    ${state.info ? `<section class="card"><h2>معلومات الجهاز</h2>
+      <div class="grid">
+        ${metric("الموديل", state.info.model)}
+        ${metric("السوفتوير", state.info.software)}
+        ${metric("المعرّف المقروء", state.info.identity)}
+        ${metric("WAN", state.info.wan)}
+        ${metric("المشغّل", state.info.operator)}
+        ${metric("DNS", (state.info.dns||[]).join(" · "))}
+      </div>
+      ${state.mode==="lab" ? '<p class="hint">المعرّف نص تجريبي وليس رقم IMEI.</p>' : ""}
+    </section>` : ""}
+    ${s ? `<section class="card"><h2>الإشارة</h2><p class="hint">تتجدد كل ٣ ثوانٍ.</p>
+      <div class="grid">
+        ${metric("RSRP", s.rsrp==null?"—":s.rsrp+" dBm")}
+        ${metric("RSRQ", s.rsrq==null?"—":s.rsrq+" dB")}
+        ${metric("SINR", s.sinr==null?"—":s.sinr+" dB")}
+        ${metric("RSSI", s.rssi==null?"—":s.rssi+" dBm")}
+        ${metric("الباند", s.band || "—")}
+        ${metric("PCI", s.pci ?? "—")}
+        ${metric("EARFCN", s.earfcn ?? "—")}
+        ${metric("Cell", s.cell || "—")}
+      </div></section>` : ""}
+    ${state.online && state.mode==="lab" ? `<section class="card"><h2>رابط الراوتر</h2>
+      <p class="hint">تقدير النموذج حسب الباند. مو سرعة خطك الحقيقي.</p>
+      <div class="grid">
+        ${metric("تنزيل", state.link ? state.link.down.toFixed(1)+" Mb/s" : "—")}
+        ${metric("رفع", state.link ? state.link.up.toFixed(1)+" Mb/s" : "—")}
+        ${metric("بنق", state.link ? state.link.ping+" ms" : "—")}
+      </div>
+      <div class="row"><button class="p" id="link">قيس الرابط</button></div>
+    </section>` : ""}
+  `;
+}
+
+function net() {
+  if (!state.online) return '<section class="card"><h2>الشبكة</h2><p class="hint">اتصل بالراوتر أولاً.</p></section>';
+  return `
+    <section class="card"><h2>DNS</h2><p class="hint">يتغير على الراوتر نفسه، مو على الجوال.</p>
+      <label>الأساسي</label><input id="dns1" dir="ltr" value="${esc(state.dns[0]||"")}" />
+      <label>الاحتياطي</label><input id="dns2" dir="ltr" value="${esc(state.dns[1]||"")}" />
+      <div class="row"><button class="p" id="saveDns">حفظ DNS</button></div>
+    </section>
+    <section class="card"><h2>APN</h2>
+      <label>الاسم</label><input id="apnName" value="${esc(state.apnName)}" />
+      <label>APN</label><input id="apn" dir="ltr" value="${esc(state.apn)}" />
+      <div class="row"><button class="p" id="saveApn">حفظ APN</button></div>
+    </section>
+    <section class="card"><h2>عنوان الشبكة</h2><p class="hint">تغييره قد يفصل الواي فاي لحين ما ترجع تدخل.</p>
+      <input id="lan" dir="ltr" value="${esc(state.lan)}" />
+      <div class="row"><button class="p" id="saveLan">حفظ العنوان</button></div>
+    </section>`;
+}
+
+function scan() {
+  if (!state.online) return '<section class="card"><h2>الفحص</h2><p class="hint">اتصل بالراوتر أولاً.</p></section>';
+  const rows = Object.keys(PROFILES).map(band => {
+    const p = PROFILES[band];
+    return `<tr><td>${esc(band)}</td><td>${p.alive?p.rsrp:"—"}</td><td>${p.alive?p.ping+" ms":"يقطع"}</td><td><button class="g" data-lock="${esc(band)}">اقفل</button></td></tr>`;
+  }).join("");
+  const report = state.report ? `<table><tr><th>الباند</th><th>بنق</th><th>تنزيل</th><th>الحالة</th></tr>
+    <tr><td>قبل ${esc(state.report.baseBand)}</td><td>${state.report.basePing ?? "—"}</td><td>${state.report.baseDown ?? "—"}</td><td>أساس</td></tr>
+    ${state.report.rows.map(r => `<tr><td>${esc(r.band)}</td><td>${r.ping ?? "—"}</td><td>${r.down ?? "—"}</td><td>${esc(r.note)}</td></tr>`).join("")}
+    </table>
+    <div class="row"><button class="p" id="applyBest">طبّق الأقل بنق</button><button class="g" id="clearLock">إرجاع تلقائي</button></div>` : "";
+  return `
+    <section class="card"><h2>فحص الترددات</h2>
+      <p class="hint">${state.mode==="lab" ? "أرقام النموذج قبل القفل. B40 يقطع الخدمة عشان تشوف الإرجاع." : "على الراوتر الحي نقرأ الإشارة ونحاول قفل LTE إن الجهاز قبله."}</p>
+      <table><tr><th>الباند</th><th>RSRP</th><th>بنق</th><th></th></tr>${state.mode==="lab"?rows:`<tr><td>${esc(state.signal&&state.signal.band||"—")}</td><td>${state.signal&&state.signal.rsrp||"—"}</td><td>—</td><td></td></tr>`}</table>
+      <div class="row"><button class="g" id="clearLock2">إرجاع تلقائي</button></div>
+    </section>
+    <section class="card"><h2>التحسين الذكي</h2>
+      <p class="hint">نقفل باند باند ونقيس. إذا انقطعت الخدمة نرجّع السابق فورًا، وفي الآخر يرجع الجهاز لوضعه وأنت تختار.</p>
+      <input id="bands" dir="ltr" value="${esc(state.bands)}" />
+      <div class="row"><button class="p" id="tune" ${state.busy?"disabled":""}>${state.busy?"يشتغل…":"ابدأ التحسين"}</button></div>
+      <div id="tuneLog" class="hint"></div>
+      ${report}
+    </section>`;
+}
+
+function clients() {
+  if (!state.online) return '<section class="card"><h2>المتصلون</h2><p class="hint">اتصل بالراوتر أولاً.</p></section>';
+  const list = state.clients.map(c => `<div class="metric" style="margin-bottom:8px"><b>${esc(c.name)}</b><small dir="ltr">${esc(c.ip)} · ${esc(c.mac)}</small></div>`).join("");
+  return `<section class="card"><h2>المتصلون</h2><p class="hint">${state.mode==="lab"?"قائمة التجريبي.":"من واجهة هواوي إن الجهاز يعطيها."}</p>${list || '<p class="hint">ما في أجهزة ظاهرة.</p>'}</section>`;
+}
+
+function more() {
+  return `
+    <section class="card"><h2>الإصدار</h2><p class="hint">موجه ${VERSION} · رقم البناء 1. للتثبيت على جوالك، اسمح بالمصادر غير المعروفة ثم افتح ملف APK.</p></section>
+    <section class="card"><h2>الطاقة</h2>
+      <p class="hint">إعادة التشغيل تأكيد واحد. الإطفاء وضبط المصنع تأكيدين.</p>
+      ${state.online ? `<div class="row">
+        <button class="g" id="reboot">إعادة تشغيل</button>
+        <button class="d" id="off">إطفاء</button>
+        <button class="d" id="reset">ضبط مصنع</button>
+      </div>` : '<p class="hint">اتصل أولاً.</p>'}
+    </section>
+    <section class="card"><h2>وضع الألعاب</h2>
+      <p class="hint">في التجريبي ينقص ٤ ملي ثانية من بنق النموذج. مو تسريع سحري.</p>
+      <button class="g" id="game">${state.game?"إيقاف":"تشغيل"}</button>
+    </section>
+    <section class="card"><h2>السجل</h2>
+      ${state.logs.slice(0,12).map(l => `<p class="hint">${esc(l.t)} · ${esc(l.summary)}</p>`).join("") || '<p class="hint">فاضي.</p>'}
+    </section>
+    <section class="card"><h2>سلامة</h2>
+      <p class="hint">للجهاز اللي تملكه. قفل التردد قد يقطع النت. ما نغيّر IMEI ولا نفك قفل الشريحة ولا نحفظ كلمة المرور.</p>
+    </section>`;
+}
+
+function render() {
+  const root = document.getElementById("app");
+  const banner = state.notice ? `<div class="banner ${state.noticeBad?"bad":"ok"}">${esc(state.notice)}</div>` : "";
+  const body = state.tab==="home"?home():state.tab==="net"?net():state.tab==="scan"?scan():state.tab==="clients"?clients():more();
+  root.innerHTML = banner + body;
+  document.getElementById("status").textContent = state.busy ? "يشتغل…" : state.online ? "متصل" : "بانتظار اتصال";
+  bind();
+}
+
+function val(id) { const el = document.getElementById(id); return el ? el.value : ""; }
+
+function bind() {
+  const mode = document.getElementById("mode");
+  if (mode) mode.onchange = () => { state.mode = mode.value; if (state.online) disconnect(); else render(); };
+  const gw = document.getElementById("gw");
+  if (gw) gw.onchange = () => { state.gateway = gw.value.trim() || state.gateway; };
+  const user = document.getElementById("user");
+  if (user) user.onchange = () => { state.username = user.value.trim() || "admin"; };
+  const go = document.getElementById("go");
+  if (go) go.onclick = () => connect(val("pass"));
+  const lab = document.getElementById("lab");
+  if (lab) lab.onclick = () => { state.username = "admin"; connect("admin"); };
+  const disc = document.getElementById("disc");
+  if (disc) disc.onclick = disconnect;
+  const link = document.getElementById("link");
+  if (link) link.onclick = () => {
+    try { state.link = labLink(); log("قياس رابط تجريبي: "+state.link.ping+" ms"); setNotice("انقاس الرابط من النموذج.", false); }
+    catch (e) { setNotice(e.message, true); }
+  };
+  const saveDns = document.getElementById("saveDns");
+  if (saveDns) saveDns.onclick = async () => {
+    const a = val("dns1").trim(), b = val("dns2").trim();
+    if (!a || !b) return setNotice("اكتب خادمي DNS.", true);
+    try {
+      if (state.mode === "live") {
+        const dhcp = await liveExchange("/api/dhcp/settings", "GET");
+        await liveExchange("/api/dhcp/settings", "POST", xml({
+          DhcpIPAddress: tag(dhcp,"DhcpIPAddress") || "192.168.8.1",
+          DhcpLanNetmask: tag(dhcp,"DhcpLanNetmask") || "255.255.255.0",
+          DhcpStatus: tag(dhcp,"DhcpStatus") || "1",
+          DhcpStartIPAddress: tag(dhcp,"DhcpStartIPAddress") || "192.168.8.100",
+          DhcpEndIPAddress: tag(dhcp,"DhcpEndIPAddress") || "192.168.8.200",
+          DhcpLeaseTime: tag(dhcp,"DhcpLeaseTime") || "86400",
+          DnsStatus: "1", PrimaryDns: a, SecondaryDns: b
+        }));
+        await refreshLive();
+      }
+      state.dns = [a, b];
+      if (state.info) state.info.dns = state.dns.slice();
+      log("تغيير DNS إلى "+a);
+      setNotice("انحفظ DNS.", false);
+    } catch (e) { setNotice(e.message, true); }
+  };
+  const saveApn = document.getElementById("saveApn");
+  if (saveApn) saveApn.onclick = () => {
+    state.apnName = val("apnName").trim() || "بدون اسم";
+    state.apn = val("apn").trim();
+    if (!state.apn) return setNotice("اكتب نقطة الوصول.", true);
+    log("تعديل APN إلى "+state.apn);
+    setNotice(state.mode==="lab" ? "انحفظت نقطة الوصول على التجريبي." : "حفظ APN الحي يعتمد على موديل الراوتر، والتجريبي يحفظه محليًا في هالنسخة.", false);
+  };
+  const saveLan = document.getElementById("saveLan");
+  if (saveLan) saveLan.onclick = () => {
+    state.lan = val("lan").trim();
+    log("تغيير عنوان الشبكة إلى "+state.lan);
+    setNotice("انحفظ العنوان على الجلسة.", false);
+  };
+  document.querySelectorAll("[data-lock]").forEach(btn => {
+    btn.onclick = () => lockBand(btn.getAttribute("data-lock"));
+  });
+  const clear = document.getElementById("clearLock") || document.getElementById("clearLock2");
+  document.querySelectorAll("#clearLock,#clearLock2").forEach(el => el.onclick = () => {
+    state.lock = null;
+    if (state.mode==="lab") refreshLab();
+    log("إرجاع القفل التلقائي");
+    setNotice("رجعنا القفل التلقائي.", false);
+  });
+  const tune = document.getElementById("tune");
+  if (tune) tune.onclick = () => runTune();
+  const apply = document.getElementById("applyBest");
+  if (apply) apply.onclick = () => {
+    const best = bestRow();
+    if (!best) return setNotice("ما في قياس ناجح.", true);
+    const before = state.report.basePing;
+    lockBand(best.band);
+    const after = best.ping;
+    const cmp = before==null || after==null ? "" : after < before ? ` البنق نزل من ${before} ms إلى ${after} ms.` : after > before ? ` البنق ارتفع من ${before} ms إلى ${after} ms.` : ` البنق ثبت عند ${after} ms.`;
+    setNotice("القفل انطبق على "+best.band+"." + (state.mode==="lab" ? " في النموذج،" : "") + cmp, false);
+  };
+  const bands = document.getElementById("bands");
+  if (bands) bands.onchange = () => { state.bands = bands.value; };
+  const reboot = document.getElementById("reboot");
+  if (reboot) reboot.onclick = () => ask("إعادة التشغيل", "الراوتر بيفصل تقريبًا دقيقة ثم يرجع.", false, async () => {
+    if (state.mode==="live") {
+      const reply = await liveExchange("/api/device/control", "POST", xml({Control:"1"}));
+      assertOk(reply);
+      state.online = false;
+    } else {
+      state.lock = null; refreshLab();
+    }
+    log("إعادة تشغيل");
+    setNotice("أُرسلت إعادة التشغيل.", false);
+  });
+  const off = document.getElementById("off");
+  if (off) off.onclick = () => ask("إطفاء", "يقطع النت عن البيت إلى أن تشغّل الراوتر من زره.", true, async () => {
+    if (state.mode==="live") {
+      const reply = await liveExchange("/api/device/control", "POST", xml({Control:"4"}));
+      assertOk(reply);
+    }
+    state.online = false; state.info = null; state.signal = null;
+    log("إطفاء");
+    setNotice("انطفى الجهاز في الجلسة.", false);
+  });
+  const reset = document.getElementById("reset");
+  if (reset) reset.onclick = () => ask("ضبط المصنع", "يمسح DNS والقفل وإعدادات التجريبي. على جهاز حقيقي هذا ضبط مصنع.", true, async () => {
+    if (state.mode==="live") {
+      const reply = await liveExchange("/api/device/control", "POST", xml({Control:"2"}));
+      assertOk(reply);
+      state.online = false;
+    } else {
+      state.dns = ["8.8.8.8","1.1.1.1"]; state.lan = "192.168.8.1"; state.apn = "jawalnet.com.sa"; state.lock = null; state.game = false;
+      refreshLab();
+    }
+    log("ضبط مصنع");
+    setNotice("تم ضبط المصنع.", false);
+  });
+  const game = document.getElementById("game");
+  if (game) game.onclick = () => { state.game = !state.game; log(state.game?"تشغيل وضع الألعاب":"إيقاف وضع الألعاب"); render(); };
+}
+
+function lockBand(band) {
+  if (!PROFILES[band] && state.mode==="lab") return setNotice("هذا الباند غير موجود في النموذج.", true);
+  state.lock = band;
+  if (state.mode==="lab") refreshLab();
+  log("قفل "+band);
+  setNotice("القفل انطبق على "+band+".", false);
+}
+
+function bestRow() {
+  if (!state.report) return null;
+  return state.report.rows.filter(r => r.ok).sort((a,b) => a.ping - b.ping)[0] || null;
+}
+
+async function runTune() {
+  if (state.mode !== "lab") {
+    setNotice("التحسين المتتابع بالقياس مفعّل على التجريبي. على الحي نعرض الإشارة وقفل الباند بدون ما نختلق سرعة.", true);
+    return;
+  }
+  const bands = state.bands.split(/[\s,]+/).map(s => s.trim()).filter(s => PROFILES[s]);
+  if (!bands.length) return setNotice("اكتب باندات مثل B3 أو n78.", true);
+  const beforeLock = state.lock;
+  const base = labLink();
+  state.busy = true; render();
+  const rows = [];
+  for (const band of bands) {
+    state.lock = band;
+    refreshLab();
+    const p = profile(band);
+    if (!p.alive || !state.signal.cell) {
+      state.lock = beforeLock;
+      refreshLab();
+      rows.push({band, ping:null, down:null, ok:false, note:"انقطعت الخدمة. رجعنا السابق."});
+      continue;
+    }
+    await new Promise(r => setTimeout(r, 350));
+    const m = labLink();
+    rows.push({band, ping:m.ping, down:m.down, ok:true, note:"بعد الاستقرار"});
+  }
+  state.lock = beforeLock;
+  refreshLab();
+  state.report = {baseBand: beforeLock || "B3", basePing: base.ping, baseDown: base.down, rows};
+  state.busy = false;
+  log("خلص التحسين ورجع القفل السابق");
+  setNotice("خلص الفحص. الجهاز رجع لوضعه قبل التحسين.", false);
+}
+
+function ask(title, body, twice, action) {
+  const dlg = document.getElementById("dlg");
+  let step = 1;
+  function paint() {
+    dlg.innerHTML = `<h3>${esc(title)}</h3><p class="hint">${esc(body)}</p><p class="hint">${twice ? (step===1?"التأكيد الأول.":"التأكيد الثاني والأخير.") : "تأكيد واحد."}</p>
+      <div class="row"><button class="g" id="no">إلغاء</button><button class="d" id="yes">${twice && step===1 ? "أكمل" : "نفّذ"}</button></div>`;
+    dlg.showModal();
+    document.getElementById("no").onclick = () => dlg.close();
+    document.getElementById("yes").onclick = async () => {
+      if (twice && step === 1) { step = 2; paint(); return; }
+      dlg.close();
+      try { await action(); } catch (e) { setNotice(e.message, true); }
+    };
+  }
+  paint();
+}
+
+document.querySelectorAll("nav button").forEach(btn => {
+  btn.onclick = () => {
+    state.tab = btn.dataset.tab;
+    document.querySelectorAll("nav button").forEach(b => b.classList.toggle("on", b===btn));
+    render();
+  };
+});
+
+try {
+  const native = bridge();
+  if (native && native.version) document.getElementById("ver").textContent = "الإصدار " + native.version();
+} catch (e) {}
+
+setInterval(() => {
+  if (!state.online || state.busy || (state.tab!=="home" && state.tab!=="scan")) return;
+  if (state.mode==="lab") { refreshLab(); render(); }
+  else refreshLive().then(render).catch(e => setNotice(e.message, true));
+}, 3000);
+
+render();
+</script>
+</body>
+</html>
