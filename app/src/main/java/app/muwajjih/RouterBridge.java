@@ -5,6 +5,9 @@ import android.webkit.JavascriptInterface;
 
 import org.json.JSONObject;
 
+import java.io.InputStream;
+import java.net.InetSocketAddress;
+import java.net.Socket;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -29,12 +32,12 @@ public class RouterBridge {
 
     @JavascriptInterface
     public String version() {
-        return "1.0.3";
+        return "1.0.4";
     }
 
     @JavascriptInterface
     public int versionCode() {
-        return 4;
+        return 5;
     }
 
     /** Huawei password_type 4: base64(hex(sha256(user + base64(hex(sha256(password))) + token))). */
@@ -67,6 +70,70 @@ public class RouterBridge {
 
     private static String base64Ascii(String ascii) {
         return Base64.encodeToString(ascii.getBytes(StandardCharsets.US_ASCII), Base64.NO_WRAP);
+    }
+
+    private final OkHttpClient meter = new OkHttpClient.Builder()
+            .connectTimeout(8, TimeUnit.SECONDS)
+            .readTimeout(20, TimeUnit.SECONDS)
+            .writeTimeout(20, TimeUnit.SECONDS)
+            .callTimeout(25, TimeUnit.SECONDS)
+            .build();
+
+    /** Speed through the phone, which is the router path when the phone is on its Wi-Fi. */
+    @JavascriptInterface
+    public String measure() {
+        try {
+            int ping = tcpPing("1.1.1.1", 443, 4000);
+            double down = transferMbps(true);
+            double up = transferMbps(false);
+            JSONObject json = new JSONObject();
+            json.put("ok", true);
+            json.put("ping", ping);
+            json.put("down", Math.round(down * 10.0) / 10.0);
+            json.put("up", Math.round(up * 10.0) / 10.0);
+            return json.toString();
+        } catch (Exception error) {
+            return fail("تعذّر قياس السرعة من الجوال.");
+        }
+    }
+
+    private static int tcpPing(String host, int port, int timeoutMs) throws Exception {
+        long start = System.nanoTime();
+        try (Socket socket = new Socket()) {
+            socket.connect(new InetSocketAddress(host, port), timeoutMs);
+        }
+        return (int) Math.max(1, (System.nanoTime() - start) / 1_000_000L);
+    }
+
+    private double transferMbps(boolean download) throws Exception {
+        long start = System.nanoTime();
+        long bytes;
+        if (download) {
+            Request request = new Request.Builder()
+                    .url("https://speed.cloudflare.com/__down?bytes=1500000")
+                    .build();
+            try (Response response = meter.newCall(request).execute()) {
+                if (response.body() == null) throw new Exception("empty");
+                InputStream input = response.body().byteStream();
+                byte[] buffer = new byte[8192];
+                bytes = 0;
+                int read;
+                while ((read = input.read(buffer)) > 0) bytes += read;
+            }
+        } else {
+            byte[] payload = new byte[200_000];
+            Request request = new Request.Builder()
+                    .url("https://speed.cloudflare.com/__up")
+                    .post(RequestBody.create(payload, MediaType.get("application/octet-stream")))
+                    .build();
+            try (Response response = meter.newCall(request).execute()) {
+                bytes = payload.length;
+                if (!response.isSuccessful()) throw new Exception("upload");
+            }
+        }
+        double seconds = (System.nanoTime() - start) / 1_000_000_000.0;
+        if (seconds < 0.05) seconds = 0.05;
+        return (bytes * 8.0 / seconds) / 1_000_000.0;
     }
 
     @JavascriptInterface

@@ -66,7 +66,7 @@
 </head>
 <body>
 <header>
-  <div><b>موجه</b><div class="hint" id="ver" style="margin:2px 0 0">الإصدار 1.0.3</div></div>
+  <div><b>موجه</b><div class="hint" id="ver" style="margin:2px 0 0">الإصدار 1.0.4</div></div>
   <span id="status">بانتظار اتصال</span>
 </header>
 <main id="app"></main>
@@ -79,7 +79,7 @@
 </nav>
 <dialog id="dlg"></dialog>
 <script>
-const VERSION = "1.0.3";
+const VERSION = "1.0.4";
 const PROFILES = {
   B1: {alive:1, rsrp:-102, rsrq:-12, sinr:6, rssi:-74, pci:201, earfcn:100, cell:"A1B2", ping:68, down:18, up:8},
   B3: {alive:1, rsrp:-91, rsrq:-9, sinr:14, rssi:-62, pci:88, earfcn:1650, cell:"C3D4", ping:41, down:48, up:16},
@@ -117,6 +117,8 @@ const state = {
   report: null,
   bands: "B1, B3, B7, B8, B20, B28, n41, n78, B40",
   link: null,
+  netMode: "",
+  radioCode: "",
   busy: false
 };
 let draftPassword = "";
@@ -233,9 +235,18 @@ async function liveLogin(password) {
 
 async function refreshLive() {
   const info = await liveExchange("/api/device/information", "GET");
-  let wan = "—", operator = "—", dns = [], lan = "—";
-  try { wan = tag(await liveExchange("/api/monitoring/status", "GET"), "WanIPAddress") || "—"; } catch (e) {}
+  let wan = "—", operator = "—", dns = [], lan = "—", radio = "";
+  try {
+    const status = await liveExchange("/api/monitoring/status", "GET");
+    wan = tag(status, "WanIPAddress") || "—";
+    radio = tag(status, "CurrentNetworkTypeEx") || tag(status, "CurrentNetworkType") || "";
+  } catch (e) {}
+  state.radioCode = radio;
   try { operator = tag(await liveExchange("/api/net/current-plmn", "GET"), "FullName") || "—"; } catch (e) {}
+  try {
+    const modeXml = await liveExchange("/api/net/net-mode", "GET");
+    state.netMode = tag(modeXml, "NetworkMode") || state.netMode;
+  } catch (e) {}
   try {
     const dhcp = await liveExchange("/api/dhcp/settings", "GET");
     lan = tag(dhcp, "DhcpIPAddress") || "—";
@@ -252,9 +263,12 @@ async function refreshLive() {
   if (lan !== "—") state.lan = lan;
   const sig = await liveExchange("/api/device/signal", "GET");
   const bandRaw = tag(sig, "band") || tag(sig, "lte_band");
+  const nrRaw = tag(sig, "nrband") || tag(sig, "nr_band") || tag(sig, "nrdlband");
   state.signal = {
     rsrp: num(tag(sig, "rsrp")), rsrq: num(tag(sig, "rsrq")), sinr: num(tag(sig, "sinr")),
-    rssi: num(tag(sig, "rssi")), band: bandRaw ? "B"+bandRaw.replace(/\D/g,"") : null,
+    rssi: num(tag(sig, "rssi")), band: bandRaw ? "B"+String(bandRaw).replace(/\D/g,"") : null,
+    nrRsrp: num(tag(sig, "nrrsrp") || tag(sig, "rsrp_5g")),
+    nrBand: nrRaw ? String(nrRaw).replace(/\D/g,"") : "",
     pci: num(tag(sig, "pci")), earfcn: num(tag(sig, "earfcn")), cell: tag(sig, "cell_id") || null
   };
 }
@@ -339,7 +353,9 @@ function disconnect() {
 }
 
 function metric(label, value) {
-  return '<div class="metric"><small>'+esc(label)+'</small><b>'+esc(value == null || value === "" ? "—" : String(value))+'</b></div>';
+  const shown = value == null || value === "" ? "—" : String(value);
+  const dir = /^-?\d/.test(shown) ? ' dir="ltr"' : "";
+  return '<div class="metric"><small>'+esc(label)+'</small><b'+dir+'>'+esc(shown)+'</b></div>';
 }
 
 function home() {
@@ -402,9 +418,50 @@ function home() {
   `;
 }
 
+function ltr(value) { return '<bdi dir="ltr">'+esc(value)+'</bdi>'; }
+function modeLabel(mode) {
+  return ({"00":"تلقائي","03":"4G فقط","0302":"4G و 3G","08":"5G فقط","0803":"5G و 4G","09":"5G مستقل"})[mode] || (mode || "—");
+}
+function radioLabel() {
+  const s = state.signal;
+  if (s && s.nrRsrp != null && s.nrRsrp > -140 && s.nrRsrp < 0) return "5G" + (s.nrBand ? " n"+s.nrBand : "");
+  const code = String(state.radioCode || "");
+  if (code === "101" || code === "102" || code === "111" || code === "112") return "5G";
+  if (code === "19" || code === "41") return "4G" + (s && s.band ? " "+s.band : "");
+  if (s && s.band) return "4G "+s.band;
+  return code ? "رمز "+code : "غير معروفة";
+}
+function childTags(xmlText) {
+  const inner = String(xmlText).replace(/^[\s\S]*?<response>/i, "").replace(/<\/response>[\s\S]*$/i, "");
+  const out = {};
+  const re = /<([A-Za-z0-9_]+)>([^<]*)<\/\1>/g;
+  let match;
+  while ((match = re.exec(inner))) out[match[1]] = match[2];
+  return out;
+}
+function modeButtons() {
+  const off = state.busy ? "disabled" : "";
+  return `<p class="hint">الشبكة الظاهرة الآن: ${esc(radioLabel())}${state.netMode ? " · الوضع المحفوظ: "+esc(modeLabel(state.netMode)) : ""}.</p>
+    <div class="row">
+      <button class="p" id="prefer5g" ${off}>تفضيل 5G</button>
+      <button class="g" id="only5g" ${off}>5G فقط</button>
+      <button class="g" id="only4g" ${off}>4G فقط</button>
+      <button class="g" id="autoMode" ${off}>تلقائي</button>
+    </div>
+    <div class="row"><button class="p" id="speed" ${off}>قياس السرعة</button></div>
+    ${state.link ? `<div class="grid">
+      ${metric("تنزيل", Number(state.link.down).toFixed(1)+" Mb/s")}
+      ${metric("رفع", Number(state.link.up).toFixed(1)+" Mb/s")}
+      ${metric("بنق", state.link.ping+" ms")}
+    </div><p class="hint">القياس من جوالك وهو على واي فاي الراوتر، مو رقم مختلق.</p>` : ""}`;
+}
 function net() {
   if (!state.online) return '<section class="card"><h2>الشبكة</h2><p class="hint">اتصل بالراوتر أولاً.</p></section>';
   return `
+    ${state.mode==="live" ? `<section class="card"><h2>جيل الشبكة</h2>
+      <p class="hint">تفضيل 5G يخلّي الراوتر يقدّم الجيل الخامس ويرجع لـ 4G إذا ما فيه تغطية. 5G فقط قد يقطع النت إذا البرج ما يدعمه.</p>
+      ${modeButtons()}
+    </section>` : ""}
     <section class="card"><h2>DNS</h2><p class="hint">يتغير على الراوتر نفسه، مو على الجوال.</p>
       <label>الأساسي</label><input id="dns1" dir="ltr" value="${esc(state.dns[0]||"")}" />
       <label>الاحتياطي</label><input id="dns2" dir="ltr" value="${esc(state.dns[1]||"")}" />
@@ -423,6 +480,18 @@ function net() {
 
 function scan() {
   if (!state.online) return '<section class="card"><h2>الفحص</h2><p class="hint">اتصل بالراوتر أولاً.</p></section>';
+  if (state.mode !== "lab") {
+    const s = state.signal;
+    return `
+      <section class="card"><h2>الجيل والسرعة</h2>
+        <p class="hint">تفضيل 5G يقدّم الجيل الخامس ويبقي 4G إذا ما فيه تغطية. 5G فقط قد يقطع النت إذا البرج ما يدعمه. القياس من جوالك عبر الراوتر.</p>
+        <table><tr><th>الشبكة</th><th>RSRP</th><th>البنق</th></tr>
+          <tr><td>${esc(radioLabel())}</td><td>${ltr(s && s.rsrp != null ? s.rsrp+" dBm" : "—")}</td><td>${state.link ? ltr(state.link.ping+" ms") : "—"}</td></tr>
+          ${s && s.nrRsrp != null ? `<tr><td>5G${s.nrBand ? " n"+esc(s.nrBand) : ""}</td><td>${ltr(s.nrRsrp+" dBm")}</td><td>—</td></tr>` : ""}
+        </table>
+        ${modeButtons()}
+      </section>`;
+  }
   const rows = Object.keys(PROFILES).map(band => {
     const p = PROFILES[band];
     return `<tr><td>${esc(band)}</td><td>${p.alive?p.rsrp:"—"}</td><td>${p.alive?p.ping+" ms":"يقطع"}</td><td><button class="g" data-lock="${esc(band)}">اقفل</button></td></tr>`;
@@ -560,6 +629,16 @@ function bind() {
   });
   const tune = document.getElementById("tune");
   if (tune) tune.onclick = () => runTune();
+  const prefer = document.getElementById("prefer5g");
+  if (prefer) prefer.onclick = () => applyMode(["0803", "08", "09"]);
+  const only5 = document.getElementById("only5g");
+  if (only5) only5.onclick = () => ask("5G فقط", "إذا ما فيه تغطية 5G بينقطع النت إلى أن ترجع الوضع تلقائي أو 4G.", false, () => applyMode(["08", "09"]));
+  const only4 = document.getElementById("only4g");
+  if (only4) only4.onclick = () => applyMode(["03"]);
+  const autoMode = document.getElementById("autoMode");
+  if (autoMode) autoMode.onclick = () => applyMode(["00"]);
+  const speed = document.getElementById("speed");
+  if (speed) speed.onclick = () => measureLink();
   const apply = document.getElementById("applyBest");
   if (apply) apply.onclick = () => {
     const best = bestRow();
@@ -624,9 +703,80 @@ function bestRow() {
   return state.report.rows.filter(r => r.ok).sort((a,b) => a.ping - b.ping)[0] || null;
 }
 
+async function writeNetMode(mode) {
+  const text = await liveExchange("/api/net/net-mode", "GET");
+  assertOk(text);
+  const fields = childTags(text);
+  const body = {
+    NetworkMode: mode,
+    NetworkBand: fields.NetworkBand || "3FFFFFFF",
+    LTEBand: fields.LTEBand || "7FFFFFFFFFFFFFFF"
+  };
+  ["NrBand", "NrNsaBand", "NrSaBand"].forEach(key => { if (fields[key]) body[key] = fields[key]; });
+  const reply = await liveExchange("/api/net/net-mode", "POST", xml(body));
+  assertOk(reply);
+  state.netMode = mode;
+}
+
+async function reconnectData() {
+  await liveExchange("/api/dialup/mobile-dataswitch", "POST", xml({dataswitch: "0"}));
+  await new Promise(r => setTimeout(r, 1200));
+  await liveExchange("/api/dialup/mobile-dataswitch", "POST", xml({dataswitch: "1"}));
+}
+
+async function applyMode(modes) {
+  if (state.mode !== "live") return setNotice("هذا للراوتر الحي.", true);
+  state.busy = true;
+  render();
+  await new Promise(r => setTimeout(r, 40));
+  let applied = null;
+  let last = null;
+  try {
+    for (const mode of modes) {
+      try {
+        await writeNetMode(mode);
+        applied = mode;
+        break;
+      } catch (e) { last = e; }
+    }
+    if (!applied) throw last || new Error("الراوتر رفض وضع الشبكة.");
+    try { await reconnectData(); } catch (e) {}
+    await new Promise(r => setTimeout(r, 3500));
+    try { await refreshLive(); } catch (e) {}
+    log("وضع الشبكة "+applied);
+    setNotice("الراوتر قبل الوضع: "+modeLabel(applied)+". الظاهرة الآن: "+radioLabel()+".", false);
+  } catch (e) {
+    setNotice(e.message || "تعذّر تغيير الوضع.", true);
+  } finally {
+    state.busy = false;
+    render();
+  }
+}
+
+async function measureLink() {
+  const native = bridge();
+  if (!native || !native.measure) return setNotice("القياس يشتغل من تطبيق الجوال.", true);
+  state.busy = true;
+  render();
+  await new Promise(r => setTimeout(r, 40));
+  try {
+    const res = JSON.parse(native.measure());
+    if (!res.ok) throw new Error(res.error || "تعذّر القياس.");
+    state.link = {ping: res.ping, down: res.down, up: res.up};
+    log("قياس: "+res.down+" / "+res.up+" Mb/s");
+    setNotice("التنزيل "+res.down+" Mb/s · الرفع "+res.up+" Mb/s · البنق "+res.ping+" ms.", false);
+  } catch (e) {
+    setNotice(e.message || "تعذّر القياس.", true);
+  } finally {
+    state.busy = false;
+    render();
+  }
+}
+
 async function runTune() {
   if (state.mode !== "lab") {
-    setNotice("التحسين المتتابع بالقياس مفعّل على التجريبي. على الحي نعرض الإشارة وقفل الباند بدون ما نختلق سرعة.", true);
+    await applyMode(["0803", "08", "09"]);
+    if (state.online) await measureLink();
     return;
   }
   const bands = state.bands.split(/[\s,]+/).map(s => s.trim()).filter(s => PROFILES[s]);
