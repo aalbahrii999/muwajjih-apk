@@ -29,12 +29,12 @@ public class RouterBridge {
 
     @JavascriptInterface
     public String version() {
-        return "1.0.1";
+        return "1.0.2";
     }
 
     @JavascriptInterface
     public int versionCode() {
-        return 2;
+        return 3;
     }
 
     @JavascriptInterface

@@ -8,6 +8,10 @@ import android.webkit.WebView;
 import android.widget.TextView;
 
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.core.graphics.Insets;
+import androidx.core.view.ViewCompat;
+import androidx.core.view.WindowCompat;
+import androidx.core.view.WindowInsetsCompat;
 
 public class MainActivity extends AppCompatActivity {
     @SuppressLint("SetJavaScriptEnabled")
@@ -22,7 +26,18 @@ public class MainActivity extends AppCompatActivity {
             settings.setDomStorageEnabled(true);
             settings.setAllowFileAccess(true);
             web.addJavascriptInterface(new RouterBridge(), "Muwajjih");
+            WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
+            ViewCompat.setOnApplyWindowInsetsListener(web, (view, insets) -> {
+                Insets bars = insets.getInsets(
+                        WindowInsetsCompat.Type.systemBars()
+                                | WindowInsetsCompat.Type.displayCutout()
+                                | WindowInsetsCompat.Type.ime()
+                );
+                view.setPadding(bars.left, bars.top, bars.right, bars.bottom);
+                return WindowInsetsCompat.CONSUMED;
+            });
             setContentView(web);
+            ViewCompat.requestApplyInsets(web);
             web.loadUrl("file:///android_asset/www/index.html");
         } catch (Throwable error) {
             TextView view = new TextView(this);

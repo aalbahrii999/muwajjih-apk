@@ -22,7 +22,7 @@
   html, body { margin: 0; background: var(--bg); color: var(--ink); font-family: "Noto Naskh Arabic", "Segoe UI", sans-serif; }
   button, input, select { font-family: inherit; font-size: 16px; }
   button { cursor: pointer; }
-  header { position: sticky; top: 0; z-index: 2; display: flex; justify-content: space-between; align-items: center; padding: 14px 16px; background: rgba(11,15,20,.95); border-bottom: 1px solid var(--line); }
+  header { position: sticky; top: 0; z-index: 2; display: flex; justify-content: space-between; align-items: center; padding: 14px 16px; padding-top: calc(14px + env(safe-area-inset-top)); background: rgba(11,15,20,.95); border-bottom: 1px solid var(--line); }
   header b { font-size: 20px; }
   header span { color: var(--bright); font-size: 12px; }
   main { padding: 14px 14px 104px; max-width: 560px; margin: 0 auto; }
@@ -66,7 +66,7 @@
 </head>
 <body>
 <header>
-  <div><b>موجه</b><div class="hint" id="ver" style="margin:2px 0 0">الإصدار 1.0.1</div></div>
+  <div><b>موجه</b><div class="hint" id="ver" style="margin:2px 0 0">الإصدار 1.0.2</div></div>
   <span id="status">بانتظار اتصال</span>
 </header>
 <main id="app"></main>
@@ -79,7 +79,7 @@
 </nav>
 <dialog id="dlg"></dialog>
 <script>
-const VERSION = "1.0.1";
+const VERSION = "1.0.2";
 const PROFILES = {
   B1: {alive:1, rsrp:-102, rsrq:-12, sinr:6, rssi:-74, pci:201, earfcn:100, cell:"A1B2", ping:68, down:18, up:8},
   B3: {alive:1, rsrp:-91, rsrq:-9, sinr:14, rssi:-62, pci:88, earfcn:1650, cell:"C3D4", ping:41, down:48, up:16},
@@ -119,6 +119,7 @@ const state = {
   link: null,
   busy: false
 };
+let draftPassword = "";
 
 function log(summary) {
   state.logs.unshift({t: new Date().toLocaleTimeString("ar-SA", {hour:"2-digit", minute:"2-digit"}), summary});
@@ -148,11 +149,19 @@ function assertOk(xmlText) {
   const known = {
     "108001": "اسم المستخدم أو كلمة المرور غير صحيحة.",
     "108002": "اسم المستخدم أو كلمة المرور غير صحيحة.",
-    "108003": "اسم المستخدم أو كلمة المرور غير صحيحة.",
-    "108006": "في جلسة مفتوحة على الراوتر. اقفل صفحة الإدارة وجرّب.",
-    "108007": "محاولات كثيرة. انتظر ثم أعد الدخول."
+    "108003": "في جلسة مفتوحة على الراوتر. اقفل صفحة الإدارة في المتصفح وجرّب.",
+    "108005": "في أكثر من جلسة على الراوتر. اقفل صفحة الإدارة وجرّب.",
+    "108006": "اسم المستخدم أو كلمة المرور غير صحيحة.",
+    "108007": "محاولات كثيرة. انتظر ثم أعد الدخول.",
+    "108009": "في جلسة من جهاز ثاني. اقفلها ثم جرّب.",
+    "108010": "محاولات كثيرة. انتظر ثم أعد الدخول.",
+    "125001": "انتهت الجلسة. جرّب الاتصال مرة ثانية.",
+    "125002": "انتهت الجلسة. جرّب الاتصال مرة ثانية.",
+    "125003": "انتهت الجلسة. جرّب الاتصال مرة ثانية."
   };
-  throw new Error(known[code] || (code ? "الراوتر رفض الطلب (رمز "+code+")." : "الراوتر رفض الطلب."));
+  const err = new Error(known[code] || (code ? "الراوتر رفض الطلب (رمز "+code+")." : "الراوتر رفض الطلب."));
+  err.code = code;
+  throw err;
 }
 function bridge() { return typeof Muwajjih !== "undefined" ? Muwajjih : null; }
 
@@ -184,6 +193,28 @@ async function liveLogin(password) {
       if (ses) state.cookie = ses;
       if (tok) state.tokens = [tok];
       if (!state.tokens[0]) throw new Error("الراوتر ما أعطى رمز جلسة.");
+      try {
+        const st = await liveExchange("/api/user/state-login", "GET");
+        const wait = Number(tag(st, "remainwaittime") || "0");
+        const ptype = tag(st, "password_type");
+        if (wait > 0) {
+          const locked = new Error("محاولات كثيرة. انتظر "+wait+" ثانية ثم أعد الدخول.");
+          locked.code = "108007";
+          throw locked;
+        }
+        if (ptype && ptype !== "4") {
+          const unsupported = new Error("هذا الراوتر يستخدم نوع كلمة مرور مختلف، وما ندعمه في هالنسخة.");
+          unsupported.code = "ptype";
+          throw unsupported;
+        }
+      } catch (e) {
+        if (e.code === "108007" || e.code === "ptype") throw e;
+      }
+      const fresh = await liveExchange("/api/webserver/SesTokInfo", "GET");
+      const ses2 = tag(fresh, "SesInfo");
+      const tok2 = tag(fresh, "TokInfo") || tag(fresh, "token");
+      if (ses2) state.cookie = ses2;
+      if (tok2) state.tokens = [tok2];
       const hashed = bridge().huaweiPassword(state.username || "admin", password, state.tokens[0]);
       const reply = await liveExchange("/api/user/login", "POST", xml({
         Username: state.username || "admin",
@@ -194,7 +225,7 @@ async function liveLogin(password) {
       return;
     } catch (e) {
       last = e;
-      if (/كلمة المرور|محاولات/.test(e.message)) throw e;
+      if (String(e.code || "").startsWith("108") || e.code === "ptype") throw e;
     }
   }
   throw last || new Error("ما قدرنا نسجّل الدخول.");
@@ -267,6 +298,11 @@ function setNotice(text, bad) {
 }
 
 async function connect(password) {
+  draftPassword = password || "";
+  if (state.mode !== "lab" && !draftPassword) {
+    setNotice("اكتب كلمة المرور.", true);
+    return;
+  }
   state.busy = true; render();
   try {
     if (state.mode === "lab") {
@@ -277,6 +313,7 @@ async function connect(password) {
       refreshLab();
       log("اتصال بالراوتر التجريبي");
       setNotice("تم الاتصال بالتجريبي.", false);
+      draftPassword = "";
     } else {
       state.cookie = ""; state.tokens = [];
       await liveLogin(password);
@@ -284,6 +321,7 @@ async function connect(password) {
       await refreshLive();
       log("اتصال براوتر حي");
       setNotice("تم الاتصال بالراوتر.", false);
+      draftPassword = "";
     }
   } catch (e) {
     state.online = false;
@@ -417,7 +455,7 @@ function clients() {
 
 function more() {
   return `
-    <section class="card"><h2>الإصدار</h2><p class="hint">موجه ${VERSION} · رقم البناء 1. للتثبيت على جوالك، اسمح بالمصادر غير المعروفة ثم افتح ملف APK.</p></section>
+    <section class="card"><h2>الإصدار</h2><p class="hint">موجه ${VERSION}. للتثبيت على جوالك، اسمح بالمصادر غير المعروفة ثم افتح ملف APK.</p></section>
     <section class="card"><h2>الطاقة</h2>
       <p class="hint">إعادة التشغيل تأكيد واحد. الإطفاء وضبط المصنع تأكيدين.</p>
       ${state.online ? `<div class="row">
@@ -458,6 +496,11 @@ function bind() {
   if (user) user.onchange = () => { state.username = user.value.trim() || "admin"; };
   const go = document.getElementById("go");
   if (go) go.onclick = () => connect(val("pass"));
+  const pass = document.getElementById("pass");
+  if (pass) {
+    pass.value = draftPassword;
+    pass.oninput = () => { draftPassword = pass.value; };
+  }
   const lab = document.getElementById("lab");
   if (lab) lab.onclick = () => { state.username = "admin"; connect("admin"); };
   const disc = document.getElementById("disc");
