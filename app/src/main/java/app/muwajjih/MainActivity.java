@@ -5,6 +5,7 @@ import android.graphics.Color;
 import android.os.Bundle;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
+import android.widget.FrameLayout;
 import android.widget.TextView;
 
 import androidx.appcompat.app.AppCompatActivity;
@@ -26,8 +27,14 @@ public class MainActivity extends AppCompatActivity {
             settings.setDomStorageEnabled(true);
             settings.setAllowFileAccess(true);
             web.addJavascriptInterface(new RouterBridge(), "Muwajjih");
+            FrameLayout root = new FrameLayout(this);
+            root.setBackgroundColor(Color.parseColor("#0B0F14"));
+            root.addView(web, new FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    FrameLayout.LayoutParams.MATCH_PARENT
+            ));
             WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
-            ViewCompat.setOnApplyWindowInsetsListener(web, (view, insets) -> {
+            ViewCompat.setOnApplyWindowInsetsListener(root, (view, insets) -> {
                 Insets bars = insets.getInsets(
                         WindowInsetsCompat.Type.systemBars()
                                 | WindowInsetsCompat.Type.displayCutout()
@@ -36,8 +43,8 @@ public class MainActivity extends AppCompatActivity {
                 view.setPadding(bars.left, bars.top, bars.right, bars.bottom);
                 return WindowInsetsCompat.CONSUMED;
             });
-            setContentView(web);
-            ViewCompat.requestApplyInsets(web);
+            setContentView(root);
+            ViewCompat.requestApplyInsets(root);
             web.loadUrl("file:///android_asset/www/index.html");
         } catch (Throwable error) {
             TextView view = new TextView(this);

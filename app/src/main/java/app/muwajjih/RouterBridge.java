@@ -29,27 +29,44 @@ public class RouterBridge {
 
     @JavascriptInterface
     public String version() {
-        return "1.0.2";
+        return "1.0.3";
     }
 
     @JavascriptInterface
     public int versionCode() {
-        return 3;
+        return 4;
     }
 
+    /** Huawei password_type 4: base64(hex(sha256(user + base64(hex(sha256(password))) + token))). */
     @JavascriptInterface
     public String huaweiPassword(String username, String password, String token) {
-        return b64(username + b64(password) + token);
+        String inner = base64Ascii(sha256Hex(password));
+        return base64Ascii(sha256Hex(username + inner + token));
     }
 
-    private static String b64(String value) {
+    /** Huawei password_type 0 and 3: base64 of the password itself. */
+    @JavascriptInterface
+    public String huaweiPasswordBasic(String password) {
+        return Base64.encodeToString(password.getBytes(StandardCharsets.UTF_8), Base64.NO_WRAP);
+    }
+
+    private static String sha256Hex(String value) {
         try {
             byte[] digest = MessageDigest.getInstance("SHA-256")
                     .digest(value.getBytes(StandardCharsets.UTF_8));
-            return Base64.encodeToString(digest, Base64.NO_WRAP);
+            StringBuilder hex = new StringBuilder(digest.length * 2);
+            for (byte piece : digest) {
+                hex.append(Character.forDigit((piece >> 4) & 0xF, 16));
+                hex.append(Character.forDigit(piece & 0xF, 16));
+            }
+            return hex.toString();
         } catch (Exception error) {
             return "";
         }
+    }
+
+    private static String base64Ascii(String ascii) {
+        return Base64.encodeToString(ascii.getBytes(StandardCharsets.US_ASCII), Base64.NO_WRAP);
     }
 
     @JavascriptInterface
@@ -64,7 +81,10 @@ public class RouterBridge {
         try {
             String url = safeUrl(baseUrl, path);
             boolean post = method != null && method.equalsIgnoreCase("POST");
-            Request.Builder builder = new Request.Builder().url(url).header("Accept", "*/*");
+            Request.Builder builder = new Request.Builder()
+                    .url(url)
+                    .header("Accept", "*/*")
+                    .header("X-Requested-With", "XMLHttpRequest");
             String cookieHeader = headerOrNull(cookie);
             if (cookieHeader != null) builder.header("Cookie", cookieHeader);
             String tokenHeader = headerOrNull(token);
